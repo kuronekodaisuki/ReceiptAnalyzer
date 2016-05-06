@@ -7,21 +7,26 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using System.IO;
 using System.Configuration;
 using System.Collections.Specialized;
 using System.Xml;
 
 using Emgu.CV;
 using Emgu.CV.Features2D;
+using Emgu.CV.Flann;
 using Emgu.CV.Structure;
 using Emgu.CV.OCR;
-using Emgu.Util;
+using Emgu.CV.Util;
+using Emgu.CV.Reflection;
+
+using Tesseract;
 
 namespace EmguTest
 {
     public partial class Form1 : Form
     {
-        private Tesseract _ocr;
+        private Tesseract.TesseractEngine _ocr;
         static NameValueCollection appSettings = ConfigurationManager.AppSettings;
         static XmlDocument xml = new XmlDocument();
         static Image<Gray, byte> header, footer;
@@ -29,7 +34,7 @@ namespace EmguTest
         public Form1()
         {
             InitializeComponent();
-            _ocr = new Tesseract("", "eng", OcrEngineMode.TesseractOnly);
+            _ocr = new Tesseract.TesseractEngine(@"", @"eng", EngineMode.TesseractOnly);
             string templateFile = appSettings["RECEIPT.TEMPLATE"];
             xml.Load(templateFile);
             XmlNode doc = xml.DocumentElement;
@@ -65,11 +70,55 @@ namespace EmguTest
 
                       Image<Gray, byte>[] gray = hsv.Split();
                       gray[2]._GammaCorrect(2.0);
-                      _ocr.Recognize(gray[2].Erode(1));
+                      //_ocr.Recognize(gray[2].Erode(1));
+                      Tesseract.Page page =_ocr.Process(gray[2].Erode(1).Bitmap);
 
-                      // 
+
+                      ocrTextBox.Text = Path.GetFileName(openFileDialog.FileName) + "\r\n";
+                      int height = 0, count = 0;
+                     
+                      using (var iter = page.GetIterator())
+                      {
+                          Rect bounds;
+                          do {
+                              do {
+                                  do {
+                                      do {
+                                          if (iter.TryGetBoundingBox(Tesseract.PageIteratorLevel.Symbol, out bounds))
+                                          {
+                                              height += bounds.Height;
+                                              Rectangle rect = new Rectangle(bounds.X1, bounds.Y1, bounds.Width, bounds.Height);
+                                              image.Draw(rect, drawColor, 1);
+                                              for (int y = bounds.Y1; y < bounds.Y2; y++)
+                                              {
+                                                  histogram[y]++;
+                                              }
+                                              count++;
+                                          }
+                                      } while (iter.Next(Tesseract.PageIteratorLevel.Symbol));
+
+                                  } while (iter.Next(Tesseract.PageIteratorLevel.Word));
+
+                              } while (iter.Next(Tesseract.PageIteratorLevel.TextLine, Tesseract.PageIteratorLevel.Word));
+
+                              //string text = iter.GetText(Tesseract.PageIteratorLevel.TextLine);
+                              //ocrTextBox.Text += text + "\r\n";
+                          } while (iter.Next(Tesseract.PageIteratorLevel.Para, Tesseract.PageIteratorLevel.TextLine));
+                      }
+                      height /= count;
+
+                      using (var iter = page.GetIterator())
+                      {
+                          do
+                          {
+                              string text = iter.GetText(Tesseract.PageIteratorLevel.TextLine);
+                              ocrTextBox.Text += text + "\r\n";
+                          } while (iter.Next(Tesseract.PageIteratorLevel.TextLine));
+                      }
+
+                      /*
                       Tesseract.Character[] characters = _ocr.GetCharacters();
-                      int height = 0;
+
                       foreach (Tesseract.Character c in characters)
                       {
                           height += c.Region.Height;
@@ -81,6 +130,8 @@ namespace EmguTest
                       }
                       System.Diagnostics.Debug.WriteLine(height / characters.Length);
                       height /= characters.Length;
+                       */
+
                       
                       // Draw histogram
                       LineSegment2D line = new LineSegment2D(new Point(histogram[0], 0), new Point(histogram[1], 1));
@@ -131,12 +182,15 @@ namespace EmguTest
                           
                       imageBox1.Image = image;
 
+                      /*
                       String text = _ocr.GetText();
                       string[] lines = text.Split('\n');
-                      for (int i = 8; i < lines.Length; i++ )
+                      ocrTextBox.Text = Path.GetFileName(openFileDialog.FileName) + "\r\n";
+                      for (int i = 9; i < lines.Length; i++ )
                       {
                           ocrTextBox.Text += lines[i] + "\n";
                       }
+                       */
                       //ocrTextBox.Text = text;
                       image.Save("result.png");
                   }
@@ -146,6 +200,155 @@ namespace EmguTest
                   MessageBox.Show(exception.Message);
               }
           }
+
         }
+
+        /// <summary>
+        /// http://stackoverflow.com/questions/8051166/emgu-cv-how-i-can-get-all-occurrence-of-pattern-in-image
+        /// </summary>
+        /// <param name="modelImage"></param>
+        /// <param name="observedImage"></param>
+        static private void Matching(Image<Gray, Byte> modelImage, Image<Gray, Byte> observedImage)
+        {
+            ORBDetector detector = new ORBDetector();
+            VectorOfKeyPoint modelKeyPoints = new VectorOfKeyPoint();
+            VectorOfKeyPoint observedKeyPoints = new VectorOfKeyPoint();
+            Mat modelDescriptors = new Mat();
+            Mat observedDescriptors = new Mat();
+            VectorOfVectorOfDMatch indices = new VectorOfVectorOfDMatch();
+            Matrix<byte> mask;
+
+            int k = 2;
+            double uniquenessThreshold = 0.8;
+
+            // Detect Features
+            detector.DetectRaw(modelImage, modelKeyPoints);
+            detector.Compute(modelImage, modelKeyPoints, modelDescriptors);
+
+            detector.DetectRaw(observedImage, observedKeyPoints);
+            detector.Compute(observedImage, observedKeyPoints, observedDescriptors);
+
+            BFMatcher matcher = new BFMatcher(DistanceType.L2);
+            matcher.Add(modelDescriptors);
+
+            //indices = new Matrix<int>(observedDescriptors.Rows, k);
+            using (Matrix<float> dist = new Matrix<float>(observedDescriptors.Rows, k))
+            {
+                matcher.KnnMatch(observedDescriptors, indices, k, null);
+                mask = new Matrix<byte>(dist.Rows, 1);
+                mask.SetValue(255);
+                //Features2DToolbox.VoteForUniqueness(indices, uniquenessThreshold, mask);
+            }
+
+            /*
+            int nonZeroCount = CvInvoke.cvCountNonZero(mask);
+            if (nonZeroCount >= 4)
+            {
+                nonZeroCount = Features2DToolbox.VoteForSizeAndOrientation(modelKeyPoints, observedKeyPoints, indices, mask, 1.5, 20);
+                if (nonZeroCount >= 4)
+                    homography = Features2DToolbox.GetHomographyMatrixFromMatchedFeatures(modelKeyPoints, observedKeyPoints, indices, mask, 2);
+            }
+
+            #region draw the projected region on the image
+            if (homography != null)
+            {  //draw a rectangle along the projected model
+                Rectangle rect = modelImage.ROI;
+                PointF[] pts = new PointF[] { 
+               new PointF(rect.Left, rect.Bottom),
+               new PointF(rect.Right, rect.Bottom),
+               new PointF(rect.Right, rect.Top),
+               new PointF(rect.Left, rect.Top)};
+                homography.ProjectPoints(pts);
+
+                //result.DrawPolyline(Array.ConvertAll<PointF, Point>(pts, Point.Round), true, new Bgr(Color.Red), 5);
+            }
+            #endregion
+             */
+        }
+
+        /*
+        /// <summary>
+        /// http://www.emgu.com/wiki/index.php/FAST_feature_detector_in_CSharp
+        /// </summary>
+        /// <param name="modelImage"></param>
+        /// <param name="observedImage"></param>
+        /// <returns></returns>
+        public static Image<Bgr, Byte> Draw(Image<Gray, Byte> modelImage, Image<Gray, byte> observedImage)
+        {
+            //HomographyMatrix homography = null;
+
+            FastDetector fastCPU = new FastDetector(10, true);
+            VectorOfKeyPoint modelKeyPoints;
+            VectorOfKeyPoint observedKeyPoints;
+            VectorOfVectorOfDMatch indices = new VectorOfVectorOfDMatch();
+            //Matrix<int> indices;
+
+            //BriefDescriptorExtractor descriptor = new BriefDescriptorExtractor();
+
+            Matrix<byte> mask;
+            int k = 2;
+            double uniquenessThreshold = 0.8;
+
+            //extract features from the object image
+            fastCPU.DetectRaw(modelImage, modelKeyPoints, null);
+            //Matrix<Byte> modelDescriptors = descriptor.ComputeDescriptorsRaw(modelImage, null, modelKeyPoints);
+
+            // extract features from the observed image
+            fastCPU.DetectRaw(observedImage, observedKeyPoints, null);
+            //Matrix<Byte> observedDescriptors = descriptor.ComputeDescriptorsRaw(observedImage, null, observedKeyPoints);
+            BFMatcher matcher = new BFMatcher(DistanceType.L2);
+            matcher.Add(modelDescriptors);
+
+            //indices = new Matrix<int>(observedDescriptors.Rows, k);
+            using (Matrix<float> dist = new Matrix<float>(observedDescriptors.Rows, k))
+            {
+                matcher.KnnMatch(observedDescriptors, indices, k, null);
+                mask = new Matrix<byte>(dist.Rows, 1);
+                mask.SetValue(255);
+                //Features2DToolbox.VoteForUniqueness(dist, uniquenessThreshold, mask);
+            }
+
+            //Draw the matched keypoints
+            Image<Bgr, Byte> result = Features2DToolbox.DrawMatches(modelImage, modelKeyPoints, observedImage, observedKeyPoints,
+               indices, new Bgr(255, 255, 255), new Bgr(255, 255, 255), mask, Features2DToolbox.KeypointDrawType.DEFAULT);
+
+            
+            int nonZeroCount = CvInvoke.cvCountNonZero(mask);
+            if (nonZeroCount >= 4)
+            {
+                nonZeroCount = Features2DToolbox.VoteForSizeAndOrientation(modelKeyPoints, observedKeyPoints, indices, mask, 1.5, 20);
+                if (nonZeroCount >= 4)
+                    homography = Features2DToolbox.GetHomographyMatrixFromMatchedFeatures(
+                    modelKeyPoints, observedKeyPoints, indices, mask, 2);
+            }
+            
+
+            #region draw the projected region on the image
+            if (homography != null)
+            {  //draw a rectangle along the projected model
+                Rectangle rect = modelImage.ROI;
+                PointF[] pts = new PointF[] { 
+         new PointF(rect.Left, rect.Bottom),
+         new PointF(rect.Right, rect.Bottom),
+         new PointF(rect.Right, rect.Top),
+         new PointF(rect.Left, rect.Top)};
+                homography.ProjectPoints(pts);
+
+                result.DrawPolyline(Array.ConvertAll<PointF, Point>(pts, Point.Round), true, new Bgr(Color.Red), 5);
+            }
+            #endregion
+            
+
+            return result;
+        }
+         * */
+
+        /*
+        private bool Header(out Rectangle rect)
+        {
+            //HomographyMatrix matrix;
+            return false;
+        }
+         */
     }
 }
