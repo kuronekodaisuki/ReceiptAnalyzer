@@ -12,6 +12,7 @@ using System.Collections.Specialized;
 using System.Xml;
 
 using Emgu.CV;
+using Emgu.CV.Features2D;
 using Emgu.CV.Structure;
 using Emgu.CV.OCR;
 using Emgu.Util;
@@ -131,7 +132,12 @@ namespace EmguTest
                       imageBox1.Image = image;
 
                       String text = _ocr.GetText();
-                      ocrTextBox.Text = text;
+                      string[] lines = text.Split('\n');
+                      for (int i = 8; i < lines.Length; i++ )
+                      {
+                          ocrTextBox.Text += lines[i] + "\n";
+                      }
+                      //ocrTextBox.Text = text;
                       image.Save("result.png");
                   }
               }
