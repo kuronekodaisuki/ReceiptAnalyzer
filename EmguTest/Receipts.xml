@@ -1,0 +1,21 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<doc>
+  <!-- Receipt templates -->
+  <shop name="Muller">
+    <header>TEMPLATE.MULLER_HEADER</header> 
+    <item-information PFAND="PFAND-EINWEG">
+      <count/>
+      <name/>
+      <price/>
+    </item-information>
+    <IGNORE/>
+    <IGNORE/>
+    <tax-information>
+      <Rate/>
+      <Net/>
+      <Tax/>
+      <Total/>
+    </tax-information>
+    <footer>TEMPLATE.MULLER_FOOTER</footer>
+  </shop>
+</doc>
