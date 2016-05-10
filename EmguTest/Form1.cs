@@ -59,6 +59,7 @@ namespace EmguTest
           {
               Bgr drawColor = new Bgr(Color.Blue);
               Bgr redColor = new Bgr(Color.Red);
+                List<Segment> segments = new List<Segment>();
               try
               {
                   Image<Bgr, Byte> image = new Image<Bgr, byte>(openFileDialog.FileName);
@@ -157,6 +158,7 @@ namespace EmguTest
 
                       bool zero = false;
                       int zeroBegin = 0;
+                      int top = 0;
                       line.P1 = new Point(0, height / 2);
                       for (int y = height / 2; y < image.Height - height / 2; y++ )
                       {
@@ -177,6 +179,10 @@ namespace EmguTest
                               zero = false;
                               LineSegment2D separator = new LineSegment2D(new Point(0, (zeroBegin + y) / 2), new Point(image.Width, (zeroBegin + y) / 2));
                               image.Draw(separator, redColor, 3);
+                              Segment segment = new Segment(0, top, image.Width, zeroBegin - top);
+                              segments.Add(segment);
+                              image.Draw(segment.bound(), drawColor, 2);
+                              top = y;
                           }
                       }
                           
